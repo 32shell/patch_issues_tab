@@ -1,0 +1,205 @@
+From f3f5cbed23f851039af9cca4d092c2c918043d1c Mon Sep 17 00:00:00 2001
+From: Marius BALTEANU <marius.balteanu@zitec.com>
+Date: Sun, 9 Sep 2018 11:10:27 +0000
+Subject: [PATCH 3/8] move changesets to its own tab
+
+---
+ app/helpers/issues_helper.rb               |  3 ++-
+ app/views/issues/_history.html.erb         | 40 ------------------------------
+ app/views/issues/show.html.erb             |  9 -------
+ app/views/issues/tabs/_changesets.html.erb | 24 ++++++++++++++++++
+ app/views/issues/tabs/_history.html.erb    | 40 ++++++++++++++++++++++++++++++
+ test/functional/issues_controller_test.rb  | 15 +++++++++++
+ 6 files changed, 81 insertions(+), 50 deletions(-)
+ delete mode 100755 app/views/issues/_history.html.erb
+ create mode 100644 app/views/issues/tabs/_changesets.html.erb
+ create mode 100755 app/views/issues/tabs/_history.html.erb
+
+diff --git app/helpers/issues_helper.rb b/app/helpers/issues_helper.rb
+index ccf89e8..16ac246 100755
+--- app/helpers/issues_helper.rb
++++ b/app/helpers/issues_helper.rb
+@@ -553,10 +553,11 @@ module IssuesHelper
+       journals_without_notes = @journals.select{|value| value.notes.blank?}
+       journals_with_notes = @journals.reject{|value| value.notes.blank?}
+ 
+-      tabs << {:name => 'history', :label => :label_history, :onclick => 'showIssueHistory("history", this.href)', :partial => 'history', :locals => {:issue => @issue, :journals => @journals}}
++      tabs << {:name => 'history', :label => :label_history, :onclick => 'showIssueHistory("history", this.href)', :partial => 'issues/tabs/history', :locals => {:issue => @issue, :journals => @journals}}
+       tabs << {:name => 'notes', :label => :label_issue_history_notes, :onclick => 'showIssueHistory("notes", this.href)'} if journals_with_notes.any?
+       tabs << {:name => 'properties', :label => :label_issue_history_properties, :onclick => 'showIssueHistory("properties", this.href)'} if journals_without_notes.any?
+     end
++    tabs << {:name => 'changesets', :label => :label_associated_revisions, :partial => 'issues/tabs/changesets', :locals => {:changesets => @changesets}} if @changesets.present?
+     tabs
+   end
+ end
+diff --git app/views/issues/_history.html.erb b/app/views/issues/_history.html.erb
+deleted file mode 100755
+index 6571bea..0000000
+--- app/views/issues/_history.html.erb
++++ /dev/null
+@@ -1,40 +0,0 @@
+-<%
+-  issue = tab[:locals][:issue]
+-  journals = tab[:locals][:journals]
+-%>
+-
+-<% reply_links = issue.notes_addable? -%>
+-<% for journal in journals %>
+-  <div id="change-<%= journal.id %>" class="<%= journal.css_classes %>">
+-    <div id="note-<%= journal.indice %>">
+-    <div class="contextual">
+-      <span class="journal-actions"><%= render_journal_actions(issue, journal, :reply_links => reply_links) %></span>
+-      <a href="#note-<%= journal.indice %>" class="journal-link">#<%= journal.indice %></a>
+-    </div>
+-    <h4>
+-      <%= avatar(journal.user) %>
+-      <%= authoring journal.created_on, journal.user, :label => :label_updated_time_by %>
+-      <%= render_private_notes_indicator(journal) %>
+-    </h4>
+-
+-    <% if journal.details.any? %>
+-    <ul class="details">
+-      <% details_to_strings(journal.visible_details).each do |string| %>
+-       <li><%= string %></li>
+-      <% end %>
+-    </ul>
+-    <% if Setting.thumbnails_enabled? && (thumbnail_attachments = journal_thumbnail_attachments(journal)).any? %>
+-      <div class="thumbnails">
+-        <% thumbnail_attachments.each do |attachment| %>
+-          <div><%= thumbnail_tag(attachment) %></div>
+-        <% end %>
+-      </div>
+-    <% end %>
+-    <% end %>
+-    <%= render_notes(issue, journal, :reply_links => reply_links) unless journal.notes.blank? %>
+-    </div>
+-  </div>
+-  <%= call_hook(:view_issues_history_journal_bottom, { :journal => journal }) %>
+-<% end %>
+-
+-<% heads_for_wiki_formatter if User.current.allowed_to?(:edit_issue_notes, issue.project) || User.current.allowed_to?(:edit_own_issue_notes, issue.project) %>
+diff --git app/views/issues/show.html.erb b/app/views/issues/show.html.erb
+index 3a17cc4..d50f5e2 100755
+--- app/views/issues/show.html.erb
++++ b/app/views/issues/show.html.erb
+@@ -122,15 +122,6 @@ end %>
+ 
+ <%= render partial: 'action_menu_edit' if User.current.wants_comments_in_reverse_order? %>
+ 
+-<% if @changesets.present? %>
+-<div id="issue-changesets">
+-<h3><%=l(:label_associated_revisions)%></h3>
+-<%= render :partial => 'changesets', :locals => { :changesets => @changesets} %>
+-</div>
+-<% end %>
+-
+-<%= render partial: 'action_menu_edit' if User.current.wants_comments_in_reverse_order? %>
+-
+ <div id="history">
+ <h3><%=l(:label_history)%></h3>
+ <%= render_tabs issue_history_tabs, params[:tab] ? params[:tab] : 'notes' %>
+diff --git app/views/issues/tabs/_changesets.html.erb b/app/views/issues/tabs/_changesets.html.erb
+new file mode 100644
+index 0000000..7e2b01a
+--- /dev/null
++++ b/app/views/issues/tabs/_changesets.html.erb
+@@ -0,0 +1,24 @@
++<% tab[:locals][:changesets].each do |changeset| %>
++  <div id="changeset-<%= changeset.id %>" class="changeset journal">
++    <h4>
++      <%= avatar(changeset.user, :size => "24") %>
++      <%= authoring changeset.committed_on, changeset.author, :label => :label_added_time_by %>
++    </h4>
++    <p><%= link_to_revision(changeset, changeset.repository,
++                        :text => "#{l(:label_revision)} #{changeset.format_identifier}") %>
++    <% if changeset.filechanges.any? && User.current.allowed_to?(:browse_repository, changeset.project) %>
++    (<%= link_to(l(:label_diff),
++           :controller => 'repositories',
++           :action => 'diff',
++           :id     => changeset.project,
++           :repository_id => changeset.repository.identifier_param,
++           :path   => "",
++           :rev    => changeset.identifier) %>)
++    <% end %></p>
++
++    <div class="wiki changeset-comments">
++      <%= format_changeset_comments changeset %>
++    </div>
++  </div>
++  <%= call_hook(:view_issues_history_changeset_bottom, { :changeset => changeset }) %>
++<% end %>
+diff --git app/views/issues/tabs/_history.html.erb b/app/views/issues/tabs/_history.html.erb
+new file mode 100755
+index 0000000..6571bea
+--- /dev/null
++++ b/app/views/issues/tabs/_history.html.erb
+@@ -0,0 +1,40 @@
++<%
++  issue = tab[:locals][:issue]
++  journals = tab[:locals][:journals]
++%>
++
++<% reply_links = issue.notes_addable? -%>
++<% for journal in journals %>
++  <div id="change-<%= journal.id %>" class="<%= journal.css_classes %>">
++    <div id="note-<%= journal.indice %>">
++    <div class="contextual">
++      <span class="journal-actions"><%= render_journal_actions(issue, journal, :reply_links => reply_links) %></span>
++      <a href="#note-<%= journal.indice %>" class="journal-link">#<%= journal.indice %></a>
++    </div>
++    <h4>
++      <%= avatar(journal.user) %>
++      <%= authoring journal.created_on, journal.user, :label => :label_updated_time_by %>
++      <%= render_private_notes_indicator(journal) %>
++    </h4>
++
++    <% if journal.details.any? %>
++    <ul class="details">
++      <% details_to_strings(journal.visible_details).each do |string| %>
++       <li><%= string %></li>
++      <% end %>
++    </ul>
++    <% if Setting.thumbnails_enabled? && (thumbnail_attachments = journal_thumbnail_attachments(journal)).any? %>
++      <div class="thumbnails">
++        <% thumbnail_attachments.each do |attachment| %>
++          <div><%= thumbnail_tag(attachment) %></div>
++        <% end %>
++      </div>
++    <% end %>
++    <% end %>
++    <%= render_notes(issue, journal, :reply_links => reply_links) unless journal.notes.blank? %>
++    </div>
++  </div>
++  <%= call_hook(:view_issues_history_journal_bottom, { :journal => journal }) %>
++<% end %>
++
++<% heads_for_wiki_formatter if User.current.allowed_to?(:edit_issue_notes, issue.project) || User.current.allowed_to?(:edit_own_issue_notes, issue.project) %>
+diff --git test/functional/issues_controller_test.rb b/test/functional/issues_controller_test.rb
+index 9daa51e..b0097c5 100755
+--- test/functional/issues_controller_test.rb
++++ b/test/functional/issues_controller_test.rb
+@@ -2513,6 +2513,21 @@ class IssuesControllerTest < Redmine::ControllerTest
+     end
+   end
+ 
++  def test_show_display_changesets_tab_for_issue_with_changesets
++    project = Project.find(2)
++    issue = Issue.find(3)
++    issue.changeset_ids = [102]
++    issue.save!
++
++    @request.session[:user_id] = 2
++    get :show, :params => {:id => 3}
++
++    assert_select '#history' do
++      assert_select 'div.tabs ul a', 1
++      assert_select 'div.tabs a[id=?]', 'tab-changesets', :text => 'Associated revisions'
++    end
++  end
++
+   def test_get_new
+     @request.session[:user_id] = 2
+     get :new, :params => {
+-- 
+2.1.4
+

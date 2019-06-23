@@ -1,0 +1,167 @@
+From d1c05e11fa92a0a9e508bc7363233c3693da26f8 Mon Sep 17 00:00:00 2001
+From: Marius BALTEANU <marius.balteanu@zitec.com>
+Date: Sun, 9 Sep 2018 11:17:11 +0000
+Subject: [PATCH 7/8] user preference for issue history default tab
+
+---
+ app/helpers/issues_helper.rb             | 15 +++++++++++++++
+ app/helpers/users_helper.rb              |  9 +++++++++
+ app/models/user_preference.rb            |  5 ++++-
+ app/views/issues/show.html.erb           |  2 +-
+ app/views/users/_preferences.html.erb    |  1 +
+ config/locales/en.yml                    |  2 ++
+ public/javascripts/application.js        |  5 +++++
+ test/functional/users_controller_test.rb |  4 +++-
+ 8 files changed, 40 insertions(+), 3 deletions(-)
+
+diff --git a/app/helpers/issues_helper.rb b/app/helpers/issues_helper.rb
+index 3001113..8d16e7a 100755
+--- a/app/helpers/issues_helper.rb
++++ b/app/helpers/issues_helper.rb
+@@ -562,4 +562,19 @@ module IssuesHelper
+     tabs
+   end
+ 
++  def issue_history_default_tab
++    # tab params overrides user default tab preference
++    return params[:tab] if params[:tab].present?
++    user_default_tab = User.current.pref.history_default_tab
++
++    case user_default_tab
++    when 'last_tab_visited'
++      cookies['history_last_tab'].present? ? cookies['history_last_tab'] : 'notes'
++    when ''
++      'notes'
++    else
++      user_default_tab
++    end
++  end
++
+ end
+diff --git a/app/helpers/users_helper.rb b/app/helpers/users_helper.rb
+index 6b908ed..dece861 100644
+--- a/app/helpers/users_helper.rb
++++ b/app/helpers/users_helper.rb
+@@ -33,6 +33,15 @@ module UsersHelper
+     [[l(:label_font_default), '']] + UserPreference::TEXTAREA_FONT_OPTIONS.map {|o| [l("label_font_#{o}"), o]}
+   end
+ 
++  def history_default_tab_options
++    [[l('label_issue_history_notes'), 'notes'],
++     [l('label_history'), 'history'],
++     [l('label_issue_history_properties'), 'properties'],
++     [l('label_time_entry_plural'), 'time_entries'],
++     [l('label_associated_revisions'), 'changesets'],
++     [l('label_last_tab_visited'), 'last_tab_visited']]
++  end
++
+   def change_status_link(user)
+     url = {:controller => 'users', :action => 'update', :id => user, :page => params[:page], :status => params[:status], :tab => nil}
+ 
+diff --git a/app/models/user_preference.rb b/app/models/user_preference.rb
+index 14444ae..cd94486 100644
+--- a/app/models/user_preference.rb
++++ b/app/models/user_preference.rb
+@@ -33,7 +33,8 @@ class UserPreference < ActiveRecord::Base
+     'warn_on_leaving_unsaved',
+     'no_self_notified',
+     'textarea_font',
+-    'recently_used_projects'
++    'recently_used_projects',
++    'history_default_tab'
+ 
+   TEXTAREA_FONT_OPTIONS = ['monospace', 'proportional']
+ 
+@@ -93,6 +94,8 @@ class UserPreference < ActiveRecord::Base
+ 
+   def recently_used_projects; (self[:recently_used_projects] || 3).to_i; end
+   def recently_used_projects=(value); self[:recently_used_projects] = value.to_i; end
++  def history_default_tab; self[:history_default_tab]; end
++  def history_default_tab=(value); self[:history_default_tab]=value; end
+ 
+   # Returns the names of groups that are displayed on user's page
+   # Example:
+diff --git a/app/views/issues/show.html.erb b/app/views/issues/show.html.erb
+index d50f5e2..c4777ff 100755
+--- a/app/views/issues/show.html.erb
++++ b/app/views/issues/show.html.erb
+@@ -124,7 +124,7 @@ end %>
+ 
+ <div id="history">
+ <h3><%=l(:label_history)%></h3>
+-<%= render_tabs issue_history_tabs, params[:tab] ? params[:tab] : 'notes' %>
++<%= render_tabs issue_history_tabs, issue_history_default_tab %>
+ </div>
+ 
+ <%= render partial: 'action_menu_edit' unless User.current.wants_comments_in_reverse_order? %>
+diff --git a/app/views/users/_preferences.html.erb b/app/views/users/_preferences.html.erb
+index 6c4e533..6397c3a 100644
+--- a/app/views/users/_preferences.html.erb
++++ b/app/views/users/_preferences.html.erb
+@@ -5,4 +5,5 @@
+ <p><%= pref_fields.check_box :warn_on_leaving_unsaved %></p>
+ <p><%= pref_fields.select :textarea_font, textarea_font_options %></p>
+ <p><%= pref_fields.text_field :recently_used_projects, :size => 2 %></p>
++<p><%= pref_fields.select :history_default_tab, history_default_tab_options %></p>
+ <% end %>
+diff --git a/config/locales/en.yml b/config/locales/en.yml
+index 7d54ff4..0b64e97 100755
+--- a/config/locales/en.yml
++++ b/config/locales/en.yml
+@@ -383,6 +383,7 @@ en:
+   field_digest: Checksum
+   field_default_assigned_to: Default assignee
+   field_recently_used_projects: Number of recently used projects in jump box
++  field_history_default_tab: Issue's history default tab
+ 
+   setting_app_title: Application title
+   setting_welcome_text: Welcome text
+@@ -1058,6 +1059,7 @@ en:
+   label_preferred_body_part_html: HTML (experimental)
+   label_issue_history_properties: Property changes
+   label_issue_history_notes: Notes
++  label_last_tab_visited: Last visited tab
+ 
+   button_login: Login
+   button_submit: Submit
+diff --git a/public/javascripts/application.js b/public/javascripts/application.js
+index 8d043c5..4a95830 100755
+--- a/public/javascripts/application.js
++++ b/public/javascripts/application.js
+@@ -929,6 +929,11 @@ function toggleNewObjectDropdown() {
+ $(document).ready(function(){
+   $('#content').on('change', 'input[data-disables], input[data-enables], input[data-shows]', toggleDisabledOnChange);
+   toggleDisabledInit();
++
++  $('#history .tabs').on('click', 'a', function(e){
++    var tab = $(e.target).attr('id').replace('tab-','');
++    document.cookie = 'history_last_tab=' + tab
++  });
+ });
+ 
+ $(document).ready(function(){
+diff --git a/test/functional/users_controller_test.rb b/test/functional/users_controller_test.rb
+index dd54549..846a85c 100644
+--- a/test/functional/users_controller_test.rb
++++ b/test/functional/users_controller_test.rb
+@@ -292,7 +292,8 @@ class UsersControllerTest < Redmine::ControllerTest
+           'time_zone' => 'Paris',
+           'comments_sorting' => 'desc',
+           'warn_on_leaving_unsaved' => '0',
+-          'textarea_font' => 'proportional'
++          'textarea_font' => 'proportional',
++          'history_default_tab' => 'history'
+         }
+       }
+     end
+@@ -303,6 +304,7 @@ class UsersControllerTest < Redmine::ControllerTest
+     assert_equal 'desc', user.pref[:comments_sorting]
+     assert_equal '0', user.pref[:warn_on_leaving_unsaved]
+     assert_equal 'proportional', user.pref[:textarea_font]
++    assert_equal 'history', user.pref[:history_default_tab]
+   end
+ 
+   def test_create_with_generate_password_should_email_the_password
+-- 
+2.1.4
+

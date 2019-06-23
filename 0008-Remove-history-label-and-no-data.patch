@@ -1,0 +1,37 @@
+From c623e6d198c8f0ceea67304897e3ddbd2710c3ba Mon Sep 17 00:00:00 2001
+From: Marius BALTEANU <marius.balteanu@zitec.com>
+Date: Sun, 16 Jun 2019 12:39:53 +0000
+Subject: [PATCH 8/8] Remove history label and no data
+
+---
+ app/views/issues/show.html.erb     | 1 -
+ public/stylesheets/application.css | 1 +
+ 2 files changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/app/views/issues/show.html.erb b/app/views/issues/show.html.erb
+index c4777ff..7c180a4 100755
+--- a/app/views/issues/show.html.erb
++++ b/app/views/issues/show.html.erb
+@@ -123,7 +123,6 @@ end %>
+ <%= render partial: 'action_menu_edit' if User.current.wants_comments_in_reverse_order? %>
+ 
+ <div id="history">
+-<h3><%=l(:label_history)%></h3>
+ <%= render_tabs issue_history_tabs, issue_history_default_tab %>
+ </div>
+ 
+diff --git a/public/stylesheets/application.css b/public/stylesheets/application.css
+index a4c77d1..05db739 100644
+--- a/public/stylesheets/application.css
++++ b/public/stylesheets/application.css
+@@ -558,6 +558,7 @@ div.journal h4 img.gravatar {margin-left:-32px;}
+ }
+ 
+ #history div:target h4 {background-color:#DDEEFF;}
++#history p.nodata {display: none;}
+ 
+ div#activity dl, #search-results { margin-left: 2em; }
+ div#activity dd, #search-results dd { margin-bottom: 1em; padding-left: 18px; font-size: 0.9em; }
+-- 
+2.1.4
+

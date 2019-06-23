@@ -1,0 +1,122 @@
+From 85f30ec3e309fe559e77dd29db0aecbed25a41d5 Mon Sep 17 00:00:00 2001
+From: Marius BALTEANU <marius.balteanu@zitec.com>
+Date: Sun, 9 Sep 2018 11:11:53 +0000
+Subject: [PATCH 4/8] add time entries tab to issue history tabs
+
+---
+ app/controllers/issues_controller.rb         |  1 +
+ app/helpers/issues_helper.rb                 |  1 +
+ app/views/issues/tabs/_time_entries.html.erb | 28 ++++++++++++++++++++++++++++
+ test/functional/issues_controller_test.rb    | 22 ++++++++++++++++++++--
+ 4 files changed, 50 insertions(+), 2 deletions(-)
+ mode change 100644 => 100755 app/controllers/issues_controller.rb
+ create mode 100644 app/views/issues/tabs/_time_entries.html.erb
+
+diff --git a/app/controllers/issues_controller.rb b/app/controllers/issues_controller.rb
+old mode 100644
+new mode 100755
+index dcc8064..73afc79
+--- a/app/controllers/issues_controller.rb
++++ b/app/controllers/issues_controller.rb
+@@ -104,6 +104,7 @@ class IssuesController < ApplicationController
+         @allowed_statuses = @issue.new_statuses_allowed_to(User.current)
+         @priorities = IssuePriority.active
+         @time_entry = TimeEntry.new(:issue => @issue, :project => @issue.project)
++        @time_entries = @issue.time_entries.visible.preload(:activity, :user)
+         @relation = IssueRelation.new
+         retrieve_previous_and_next_issue_ids
+         render :template => 'issues/show'
+diff --git a/app/helpers/issues_helper.rb b/app/helpers/issues_helper.rb
+index 16ac246..3068afe 100755
+--- a/app/helpers/issues_helper.rb
++++ b/app/helpers/issues_helper.rb
+@@ -557,6 +557,7 @@ module IssuesHelper
+       tabs << {:name => 'notes', :label => :label_issue_history_notes, :onclick => 'showIssueHistory("notes", this.href)'} if journals_with_notes.any?
+       tabs << {:name => 'properties', :label => :label_issue_history_properties, :onclick => 'showIssueHistory("properties", this.href)'} if journals_without_notes.any?
+     end
++    tabs << {:name => 'time_entries', :label => :label_time_entry_plural, :partial => 'issues/tabs/time_entries', :locals => {:time_entries => @time_entries}} if User.current.allowed_to?(:view_time_entries, @project) && @issue.spent_hours > 0
+     tabs << {:name => 'changesets', :label => :label_associated_revisions, :partial => 'issues/tabs/changesets', :locals => {:changesets => @changesets}} if @changesets.present?
+     tabs
+   end
+diff --git a/app/views/issues/tabs/_time_entries.html.erb b/app/views/issues/tabs/_time_entries.html.erb
+new file mode 100644
+index 0000000..931a8df
+--- /dev/null
++++ b/app/views/issues/tabs/_time_entries.html.erb
+@@ -0,0 +1,28 @@
++<% for time_entry in tab[:locals][:time_entries] %>
++  <div id="time-entry-<%= time_entry.id %>" class="time_entry journal">
++    <% if time_entry.editable_by?(User.current) -%>
++      <div class="contextual">
++        <%= link_to l(:button_edit), edit_time_entry_path(time_entry),
++                    :title => l(:button_edit),
++                    :class => 'icon-only icon-edit' %>
++        <%= link_to l(:button_delete), time_entry_path(time_entry),
++                    :data => {:confirm => l(:text_are_you_sure)},
++                    :method => :delete,
++                    :title => l(:button_delete),
++                    :class => 'icon-only icon-del' %>
++      </div>
++    <% end -%>
++    <h4>
++      <%= avatar(time_entry.user, :size => "24") %>
++      <%= authoring time_entry.created_on, time_entry.user, :label => :label_added_time_by %>
++    </h4>
++    <ul class="details">
++      <li>
++        <strong><%= l(:label_time_entry_plural) %></strong>:
++        <%= l_hours_short time_entry.hours %>
++      </li>
++    </ul>
++    <p><%= time_entry.comments %></p>
++  </div>
++  <%= call_hook(:view_issues_history_time_entry_bottom, { :time_entry => time_entry }) %>
++<% end %>
+\ No newline at end of file
+diff --git a/test/functional/issues_controller_test.rb b/test/functional/issues_controller_test.rb
+index b0097c5..075d46b 100755
+--- a/test/functional/issues_controller_test.rb
++++ b/test/functional/issues_controller_test.rb
+@@ -2515,12 +2515,12 @@ class IssuesControllerTest < Redmine::ControllerTest
+ 
+   def test_show_display_changesets_tab_for_issue_with_changesets
+     project = Project.find(2)
+-    issue = Issue.find(3)
++    issue = Issue.find(9)
+     issue.changeset_ids = [102]
+     issue.save!
+ 
+     @request.session[:user_id] = 2
+-    get :show, :params => {:id => 3}
++    get :show, :params => {:id => issue.id}
+ 
+     assert_select '#history' do
+       assert_select 'div.tabs ul a', 1
+@@ -2528,6 +2528,24 @@ class IssuesControllerTest < Redmine::ControllerTest
+     end
+   end
+ 
++  def test_show_should_display_spent_time_tab_for_issue_with_time_entries
++    @request.session[:user_id] = 1
++    get :show, :params => {:id => 3}
++    assert_response :success
++
++    assert_select '#history' do
++      assert_select 'div.tabs ul a', 1
++      assert_select 'div.tabs a[id=?]', 'tab-time_entries', :text => 'Spent time'
++    end
++
++    assert_select 'div[id=?]', 'time-entry-3' do
++      assert_select 'a[title=?][href=?]', 'Edit', '/time_entries/3/edit'
++      assert_select 'a[title=?][href=?]', 'Delete', '/time_entries/3'
++
++      assert_select 'ul[class=?]', 'details', :text => /1.00 h/
++    end
++  end
++
+   def test_get_new
+     @request.session[:user_id] = 2
+     get :new, :params => {
+-- 
+2.1.4
+

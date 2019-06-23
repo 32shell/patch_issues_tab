@@ -1,0 +1,221 @@
+From 47a9c1a64679ba33d0fb009be056af1ed707ca4e Mon Sep 17 00:00:00 2001
+From: Marius BALTEANU <marius.balteanu@zitec.com>
+Date: Sun, 9 Sep 2018 11:07:12 +0000
+Subject: [PATCH 2/8] show issue history in tabs
+
+---
+ app/helpers/issues_helper.rb              | 14 ++++++++
+ app/views/issues/_history.html.erb        |  5 +++
+ app/views/issues/show.html.erb            |  6 ++--
+ config/locales/en.yml                     |  2 ++
+ public/javascripts/application.js         | 38 ++++++++++++++++++++--
+ test/functional/issues_controller_test.rb | 54 +++++++++++++++++++++++++++++++
+ 6 files changed, 113 insertions(+), 6 deletions(-)
+ mode change 100644 => 100755 app/helpers/issues_helper.rb
+ mode change 100644 => 100755 app/views/issues/_history.html.erb
+ mode change 100644 => 100755 app/views/issues/show.html.erb
+ mode change 100644 => 100755 config/locales/en.yml
+ mode change 100644 => 100755 public/javascripts/application.js
+ mode change 100644 => 100755 test/functional/issues_controller_test.rb
+
+diff --git a/app/helpers/issues_helper.rb b/app/helpers/issues_helper.rb
+old mode 100644
+new mode 100755
+index cfdb15a..ccf89e8
+--- a/app/helpers/issues_helper.rb
++++ b/app/helpers/issues_helper.rb
+@@ -545,4 +545,18 @@ module IssuesHelper
+       end
+     end
+   end
++
++  # Issue history tabs
++  def issue_history_tabs()
++    tabs = []
++    if @journals.present?
++      journals_without_notes = @journals.select{|value| value.notes.blank?}
++      journals_with_notes = @journals.reject{|value| value.notes.blank?}
++
++      tabs << {:name => 'history', :label => :label_history, :onclick => 'showIssueHistory("history", this.href)', :partial => 'history', :locals => {:issue => @issue, :journals => @journals}}
++      tabs << {:name => 'notes', :label => :label_issue_history_notes, :onclick => 'showIssueHistory("notes", this.href)'} if journals_with_notes.any?
++      tabs << {:name => 'properties', :label => :label_issue_history_properties, :onclick => 'showIssueHistory("properties", this.href)'} if journals_without_notes.any?
++    end
++    tabs
++  end
+ end
+diff --git a/app/views/issues/_history.html.erb b/app/views/issues/_history.html.erb
+old mode 100644
+new mode 100755
+index 297771d..6571bea
+--- a/app/views/issues/_history.html.erb
++++ b/app/views/issues/_history.html.erb
+@@ -1,3 +1,8 @@
++<%
++  issue = tab[:locals][:issue]
++  journals = tab[:locals][:journals]
++%>
++
+ <% reply_links = issue.notes_addable? -%>
+ <% for journal in journals %>
+   <div id="change-<%= journal.id %>" class="<%= journal.css_classes %>">
+diff --git a/app/views/issues/show.html.erb b/app/views/issues/show.html.erb
+old mode 100644
+new mode 100755
+index 6c0018f..3a17cc4
+--- a/app/views/issues/show.html.erb
++++ b/app/views/issues/show.html.erb
+@@ -129,12 +129,12 @@ end %>
+ </div>
+ <% end %>
+ 
+-<% if @journals.present? %>
++<%= render partial: 'action_menu_edit' if User.current.wants_comments_in_reverse_order? %>
++
+ <div id="history">
+ <h3><%=l(:label_history)%></h3>
+-<%= render :partial => 'history', :locals => { :issue => @issue, :journals => @journals } %>
++<%= render_tabs issue_history_tabs, params[:tab] ? params[:tab] : 'notes' %>
+ </div>
+-<% end %>
+ 
+ <%= render partial: 'action_menu_edit' unless User.current.wants_comments_in_reverse_order? %>
+ 
+diff --git a/config/locales/en.yml b/config/locales/en.yml
+old mode 100644
+new mode 100755
+index 5c5276b..7d54ff4
+--- a/config/locales/en.yml
++++ b/config/locales/en.yml
+@@ -1056,6 +1056,8 @@ en:
+   label_open_trackers_description: View all trackers description
+   label_preferred_body_part_text: Text
+   label_preferred_body_part_html: HTML (experimental)
++  label_issue_history_properties: Property changes
++  label_issue_history_notes: Notes
+ 
+   button_login: Login
+   button_submit: Submit
+diff --git a/public/javascripts/application.js b/public/javascripts/application.js
+old mode 100644
+new mode 100755
+index 25dc501..2c28c20
+--- a/public/javascripts/application.js
++++ b/public/javascripts/application.js
+@@ -353,12 +353,44 @@ function showTab(name, url) {
+   $('#tab-content-' + name).show();
+   $('#tab-' + name).closest('.tabs').find('a').removeClass('selected');
+   $('#tab-' + name).addClass('selected');
+-  //replaces current URL with the "href" attribute of the current link
+-  //(only triggered if supported by browser)
++
++  replaceInHistory(url)
++
++  return false;
++}
++
++function showIssueHistory(journal, url) {
++  tab_content = $('#tab-content-history');
++  tab_content.parent().find('.tab-content').hide();
++  tab_content.show();
++  tab_content.parent().find('div.tabs a').removeClass('selected');
++
++  $('#tab-' + journal).addClass('selected');
++
++  replaceInHistory(url)
++
++  switch(journal) {
++    case 'notes':
++      tab_content.find('.journal:not(.has-notes)').hide();
++      tab_content.find('.journal.has-notes').show();
++      break;
++    case 'properties':
++      tab_content.find('.journal.has-notes').hide();
++      tab_content.find('.journal:not(.has-notes)').show();
++      break;
++    default:
++      tab_content.find('.journal').show();
++  }
++
++  return false;
++}
++
++//replaces current URL with the "href" attribute of the current link
++//(only triggered if supported by browser)
++function replaceInHistory(url) {
+   if ("replaceState" in window.history) {
+     window.history.replaceState(null, document.title, url);
+   }
+-  return false;
+ }
+ 
+ function moveTabRight(el) {
+diff --git a/test/functional/issues_controller_test.rb b/test/functional/issues_controller_test.rb
+old mode 100644
+new mode 100755
+index 3b56722..9daa51e
+--- a/test/functional/issues_controller_test.rb
++++ b/test/functional/issues_controller_test.rb
+@@ -2459,6 +2459,60 @@ class IssuesControllerTest < Redmine::ControllerTest
+     assert_select 'a', :text => 'Delete', :count => 0
+   end
+ 
++  def test_show_should_not_display_history_tabs_for_issue_without_journals
++    @request.session[:user_id] = 1
++
++    get :show, :params => {:id => 5}
++    assert_response :success
++    assert_select '#history div.tabs', 0
++    assert_select '#history p.nodata', :text => 'No data to display'
++  end
++
++  def test_show_display_only_all_and_notes_tabs_for_issue_with_notes_only
++    @request.session[:user_id] = 1
++
++    get :show, :params => {:id => 6}
++    assert_response :success
++    assert_select '#history' do
++      assert_select 'div.tabs ul a', 2
++      assert_select 'div.tabs a[id=?]', 'tab-history', :text => 'History'
++      assert_select 'div.tabs a[id=?]', 'tab-notes', :text => 'Notes'
++    end
++  end
++
++  def test_show_display_only_all_and_history_tabs_for_issue_with_history_changes_only
++    journal = Journal.create!(:journalized => Issue.find(5), :user_id => 1)
++    detail = JournalDetail.create!(:journal => journal, :property => 'attr', :prop_key => 'description',
++      :old_value => 'Foo', :value => 'Bar')
++
++    @request.session[:user_id] = 1
++
++    get :show, :params => {:id => 5}
++    assert_response :success
++    assert_select '#history' do
++      assert_select 'div.tabs ul a', 2
++      assert_select 'div.tabs a[id=?]', 'tab-history', :text => 'History'
++      assert_select 'div.tabs a[id=?]', 'tab-properties', :text => 'Property changes'
++    end
++  end
++
++  def test_show_display_all_notes_and_history_tabs_for_issue_with_notes_and_history_changes
++    journal = Journal.create!(:journalized => Issue.find(6), :user_id => 1)
++    detail = JournalDetail.create!(:journal => journal, :property => 'attr', :prop_key => 'description',
++      :old_value => 'Foo', :value => 'Bar')
++
++    @request.session[:user_id] = 1
++
++    get :show, :params => {:id => 6}
++    assert_response :success
++    assert_select '#history' do
++      assert_select 'div.tabs ul a', 3
++      assert_select 'div.tabs a[id=?]', 'tab-history', :text => 'History'
++      assert_select 'div.tabs a[id=?]', 'tab-notes', :text => 'Notes'
++      assert_select 'div.tabs a[id=?]', 'tab-properties', :text => 'Property changes'
++    end
++  end
++
+   def test_get_new
+     @request.session[:user_id] = 2
+     get :new, :params => {
+-- 
+2.1.4
+
